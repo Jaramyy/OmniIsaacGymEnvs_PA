@@ -199,8 +199,11 @@ class irisTask(RLTask):
 
         # print(root_quats)
         rot_x = quat_axis(root_quats, 0)
+        rot_y = quat_axis(root_quats, 1)
+        rot_z = quat_axis(root_quats, 2)
 
-        # self.heading_err = self.ref_heading.unsqueeze(1) - normalize(rot_x[:, :2])
+
+        # self.heading_err = self.ref_heading - normalize(rot_x[:, :2])
         # print("ref_heading un shape = ",self.ref_heading.unsqueeze(1).shape)
         # print("ref_heading un = ",self.ref_heading.unsqueeze(1))
         # print("normalize shape  = ",normalize(rot_x[:, :2]).shape)
@@ -208,8 +211,7 @@ class irisTask(RLTask):
         # print("heading error = ",self.heading_err)
         # print("headin/g error shape = ",self.heading_err.shape)
 
-        rot_y = quat_axis(root_quats, 1)
-        rot_z = quat_axis(root_quats, 2)
+
 
         root_linvels = self.root_velocities[:, :3]
         root_angvels = self.root_velocities[:, 3:]
