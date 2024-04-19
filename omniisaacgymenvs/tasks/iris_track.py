@@ -92,7 +92,7 @@ class irisTask(RLTask):
                              "raw_spin": torch_zeros()}
         
         self.obs_log = torch.empty((1,self._num_observations), dtype=torch.float32, device=self._device)
-        self.error_log = []
+        # self.error_log = [] #not used for now
 
         self.future_traj_steps = 4
         self.traj_t0 = 0.0
@@ -103,7 +103,8 @@ class irisTask(RLTask):
         self.traj_rot = torch.zeros(self._num_envs, 4, device=self._device)
         self.target_pos = torch.zeros(self._num_envs, self.future_traj_steps, 3, device=self.device)
         self.origin = torch.tensor([0.0, 0.0, 0.0], device=self.device)
-        
+        self.ref_err = torch.zeros(self.num_envs, 2, device=self.device)
+
         self.draw = _debug_draw.acquire_debug_draw_interface()
         self.draw.clear_lines()
         self.render = True
@@ -171,6 +172,16 @@ class irisTask(RLTask):
 
         self.target_pos = self._compute_traj(steps = self.future_traj_steps, step_size=5)
         self.set_targets(self.all_indices)
+
+        # print("target pos0 = ",self.target_pos[:, 1, :2])
+        # print("target pos1 = ",self.target_pos[:, 0, :2])
+
+        # print("relative = ", self.target_pos[:, 1, :2] - self.target_pos[:, 0, :2])
+        # self.ref_err = normalize(self.target_pos[:, 1, :2] - self.target_pos[:, 0, :2])
+        self.ref_err = self.target_pos[:, 1, :2] - self.target_pos[:, 0, :2]
+        self.ref_heading = torch.atan2(self.ref_err[:, 1], self.ref_err[:, 0]).unsqueeze(1)  #size [512,1] num_envs
+        print("ref_heading = ",self.ref_heading)
+        print("ref_heading shape = ",self.ref_heading.shape)  
         # print("target pos = ",self.target_pos)
         # print("target pos shape = ",self.target_pos.shape)
         
@@ -188,12 +199,21 @@ class irisTask(RLTask):
 
         # print(root_quats)
         rot_x = quat_axis(root_quats, 0)
+
+        # self.heading_err = self.ref_heading.unsqueeze(1) - normalize(rot_x[:, :2])
+        # print("ref_heading un shape = ",self.ref_heading.unsqueeze(1).shape)
+        # print("ref_heading un = ",self.ref_heading.unsqueeze(1))
+        # print("normalize shape  = ",normalize(rot_x[:, :2]).shape)
+        # print("normalize  = ",normalize(rot_x[:, :2]))
+        # print("heading error = ",self.heading_err)
+        # print("headin/g error shape = ",self.heading_err.shape)
+
         rot_y = quat_axis(root_quats, 1)
         rot_z = quat_axis(root_quats, 2)
 
         root_linvels = self.root_velocities[:, :3]
         root_angvels = self.root_velocities[:, 3:]
-    
+        
  
         self.obs_buf[:, 0:3] = self.target_pos[:,0,:] - root_positions
         self.obs_buf[:, 3:6] = rot_x     #1,0,0
@@ -223,7 +243,7 @@ class irisTask(RLTask):
         # print("obs_buf shape",self.obs_buf.shape)
         # print("obs_buf ",self.obs_buf[0,:].shape)
 
-        # self.obs_log = torch.cat((self.obs_log,self.obs_buf[None,0,:]),dim=0)  #for logging
+        self.obs_log = torch.cat((self.obs_log,self.obs_buf[None,0,:]),dim=0)  #for logging
         
 
         observations = {
@@ -455,7 +475,6 @@ class irisTask(RLTask):
 
 
         # print(thrusts)
-
         # print("thrusts = \n",thrusts)
 
         # self.force = torch.tensor([[0,0,1,0]], device=self._device, dtype=torch.float32)

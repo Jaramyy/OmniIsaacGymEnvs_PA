@@ -38,6 +38,11 @@ from omniisaacgymenvs.utils.hydra_cfg.reformat import omegaconf_to_dict, print_d
 from omniisaacgymenvs.utils.task_util import initialize_task
 from omniisaacgymenvs.envs.vec_env_rlgames import VecEnvRLGames
 
+#    For logging
+import pandas as pd
+import time
+#____________________
+
 @hydra.main(config_name="config", config_path="../cfg")
 def parse_hydra_configs(cfg: DictConfig):
 
@@ -60,11 +65,11 @@ def parse_hydra_configs(cfg: DictConfig):
                 env._world.reset(soft=True)
             actions = torch.tensor(np.array([env.action_space.sample() for _ in range(env.num_envs)]), device=task.rl_device)
 
-            actions[:, 0] = 0.3   #Thrust
-            actions[:, 1] = 0.3   #Roll rate 
+            actions[:, 0] = 0.0   #Thrust
+            actions[:, 1] = 0.0   #Roll rate 
             actions[:, 2] = 0.0   #Pitch rate 
-            actions[:, 3] = 0.0   #Yaw rate 
-            print("actions = ",actions)
+            actions[:, 3] = 0.8   #Yaw rate 
+            # print("actions = ",actions)
             env._task.pre_physics_step(actions)
             
             env._world.step(render=render)
@@ -72,8 +77,21 @@ def parse_hydra_configs(cfg: DictConfig):
             env._task.post_physics_step()
         else:
             env._world.step(render=render)
-
+    
+    print("Simulation finished")
+    print("Saving logs...")
+    filename = "iris_observation_logs_" + time.strftime("%Y%m%d-%H%M%S") + ".csv"
+    df_obs = pd.DataFrame(task.obs_log.cpu().numpy(), columns=["err_x","err_y","err_z","rot_x_1","rot_x_2","rot_x_3","rot_y_1","rot_y_2","rot_y_3","rot_z_1","rot_z_2","rot_z_3","root_linvels_x","root_linvels_y","root_linvels_z","root_angvels_x","root_angvels_y","root_angvels_z","relative_pos0_x","relative_pos0_y","relative_pos0_z","relative_pos1_x","relative_pos1_y","relative_pos1_z","relative_pos2_x","relative_pos2_y","relative_pos2_z","relative_pos3_x","relative_pos3_y","relative_pos3_z"])
+    df_obs.to_csv(filename,index=False)
+    
+    # df_action = pd.DataFrame(task.action_log.cpu().numpy(), columns=["thrust","roll","pitch","yaw"])
+    # df_action.to_csv("iris_action_256env_horizontal.csv",index=False)
+    
     env._simulation_app.close()
+
+
+
 
 if __name__ == '__main__':
     parse_hydra_configs()
+
