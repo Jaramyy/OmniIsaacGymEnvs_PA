@@ -12,6 +12,7 @@ from omni.isaac.core.utils.nucleus import get_assets_root_path
 from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.isaac.core.utils.prims import get_prim_at_path
 from omni.isaac.core.objects import DynamicSphere
+from omni.isaac.core.objects import DynamicCylinder     #import for obstacle
 from omniisaacgymenvs.tasks.base.rl_task import RLTask
 from omniisaacgymenvs.robots.articulations.iris import iris
 from omniisaacgymenvs.robots.articulations.views.iris_view import irisView
@@ -62,6 +63,7 @@ class irisTask(RLTask):
         self.target_positions = torch.zeros((self._num_envs, 3), device=self._device, dtype=torch.float32)
         self.target_positions[:, 2] = 1
         self._ball_position = torch.tensor([0, 0, 1.0])
+        self._obs_position = torch.tensor([0.5, 0.5, 0.5])
         
         self.actions = torch.zeros((self._num_envs, 4), device=self._device, dtype=torch.float32)
         self.prev_actions = torch.zeros((self._num_envs, 4), device=self._device, dtype=torch.float32) #for 1 previous time step
@@ -86,10 +88,13 @@ class irisTask(RLTask):
                              "rew_orient": torch_zeros(), 
                              "rew_effort": torch_zeros(),
                              "rew_spin": torch_zeros(),
+                             "rew_head": torch_zeros(),
+
                              "raw_dist": torch_zeros(), 
                              "raw_orient": torch_zeros(), 
                              "raw_effort": torch_zeros(),
-                             "raw_spin": torch_zeros()}
+                             "raw_spin": torch_zeros(),
+                             "raw_head": torch_zeros()}
         
         self.obs_log = torch.empty((1,self._num_observations), dtype=torch.float32, device=self._device)
         # self.error_log = [] #not used for now
@@ -117,6 +122,7 @@ class irisTask(RLTask):
         # self.get_world_scene()
         self.get_iris()
         self.get_target()
+        self.set_obs()
         RLTask.set_up_scene(self, scene)
         
         self.central_env_idx = self._env_pos.norm(dim=-1).argmin()
@@ -128,8 +134,11 @@ class irisTask(RLTask):
 
         self._copters = irisView(prim_paths_expr="/World/envs/.*/iris", name="irisView")
         self._balls = RigidPrimView(prim_paths_expr="/World/envs/.*/ball")
+        self._obstacles = RigidPrimView(prim_paths_expr="/World/envs/.*/obs")
+
         scene.add(self._copters)
         scene.add(self._balls)
+        scene.add(self._obstacles)
 
         for i in range(4):
             scene.add(self._copters.physics_rotors[i])
@@ -161,7 +170,24 @@ class irisTask(RLTask):
         self._sim_config.apply_articulation_settings("ball", get_prim_at_path(ball.prim_path),
                                                      self._sim_config.parse_actor_config("ball"))
         ball.set_collision_enabled(False)
+    
+    def set_obs(self):
+        obs = DynamicCylinder(
+            prim_path=self.default_zero_env_path + "/obs",
+            translation=self._obs_position,
+            name="obs_0",
+            radius=0.1,
+            height=1.0,
+            color=np.array([1.0, 0.0, 0.0]),
+            mass=1.0)
+        
+        self._sim_config.apply_articulation_settings("obstacle", get_prim_at_path(obs.prim_path),
+                                                     self._sim_config.parse_actor_config("obstacle"))
+        obs.set_collision_enabled(False)
 
+
+    def normalize(self, x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+        return x / (torch.norm(x, dim=-1, keepdim=True) + eps)
 
     def get_observations(self) -> dict:
         self.root_pos, self.root_rot = self._copters.get_world_poses(clone=False)
@@ -179,9 +205,17 @@ class irisTask(RLTask):
         # print("relative = ", self.target_pos[:, 1, :2] - self.target_pos[:, 0, :2])
         # self.ref_err = normalize(self.target_pos[:, 1, :2] - self.target_pos[:, 0, :2])
         self.ref_err = self.target_pos[:, 1, :2] - self.target_pos[:, 0, :2]
-        self.ref_heading = torch.atan2(self.ref_err[:, 1], self.ref_err[:, 0]).unsqueeze(1)  #size [512,1] num_envs
-        print("ref_heading = ",self.ref_heading)
-        print("ref_heading shape = ",self.ref_heading.shape)  
+        self.ref_heading = torch.atan2(self.ref_err[:, 1], self.ref_err[:, 0]) #.unsqueeze(1)  #size [512,1] num_envs
+        # print("ref_heading = ",self.ref_heading)
+        
+        # self._copters.get_
+        self.roll, self.pitch, self.yaw = get_euler_xyz(self.root_rot)
+        # print(self.yaw.unsqueeze(1))
+        # self.err_heading = self.ref_heading - self.yaw
+
+        # print("yaw", yaw)
+
+        # print("ref_heading shape = ",self.ref_heading.shape)  
         # print("target pos = ",self.target_pos)
         # print("target pos shape = ",self.target_pos.shape)
         
@@ -203,6 +237,8 @@ class irisTask(RLTask):
         rot_z = quat_axis(root_quats, 2)
 
 
+
+        # print(self.normalize(rot_x[:, :2]))
         # self.heading_err = self.ref_heading - normalize(rot_x[:, :2])
         # print("ref_heading un shape = ",self.ref_heading.unsqueeze(1).shape)
         # print("ref_heading un = ",self.ref_heading.unsqueeze(1))
@@ -669,7 +705,10 @@ class irisTask(RLTask):
             self.extras["episode"][key] = torch.mean(
                 self.episode_sums[key][env_ids]) / self._max_episode_length
             self.episode_sums[key][env_ids] = 0.0
-
+    
+    def normalize(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+        return x / (torch.norm(x, dim=-1, keepdim=True) + eps)
+    
     def calculate_metrics(self) -> None:
         root_positions = self.root_pos - self._env_pos
         # print("root pos ",root_positions)
@@ -684,6 +723,10 @@ class irisTask(RLTask):
         
         # pos_reward = 1.0 / (1.0 + target_dist)
         # print("pos reward =\n",pos_reward)
+        heading_error = normalize(self.ref_heading - self.yaw)
+        # print("heading_error shape", heading_error.shape)
+        # print("heading_error", heading_error)
+        heading_reward = torch.exp(0.1*heading_error)
         
         ones_reward = torch.ones_like(target_dist)
         zero_reward = torch.zeros_like(target_dist)
@@ -699,8 +742,9 @@ class irisTask(RLTask):
         # print("ups \n", ups)
 
         self.orient_z = ups[:, 2]
-        # up_reward = torch.clamp(ups[:, 2], min=0.0, max=0.5)
         up_reward = 0.5 / (1.0 + torch.square(self.orient_z))
+        # up_reward = torch.clamp(ups[:, 2], min=0.0, max=0.5)
+
         # print("up reward \n", up_reward)
         # ups = quat_axis(root_quats, 2)
         
@@ -720,7 +764,7 @@ class irisTask(RLTask):
 
         # combined reward
         #self.rew_buf[:] = pos_reward + pos_reward * (up_reward + spin_reward) - effort_reward
-        self.rew_buf[:] = 1.5*pos_reward + (1.5*pos_reward * (up_reward)) + (pos_reward * (spin_reward)) - spin_penalty 
+        self.rew_buf[:] = 1.5*pos_reward + (1.5*pos_reward * (up_reward)) + (pos_reward * (spin_reward)) - spin_penalty + (1*heading_reward)
         
         # print("pos_reward = ",self.rew_buf)
         # self.rew_buf[:] = pos_reward + pos_reward * (up_reward + spin_reward) 
@@ -731,12 +775,14 @@ class irisTask(RLTask):
         self.episode_sums["rew_orient"] += up_reward
         self.episode_sums["rew_effort"] += effort_reward
         self.episode_sums["rew_spin"] += spin_reward #spin_reward
+        self.episode_sums["rew_head"] += heading_reward
 
         # log raw info
         self.episode_sums["raw_dist"] += target_dist
         self.episode_sums["raw_orient"] += ups[..., 2]
         self.episode_sums["raw_effort"] += effort
         self.episode_sums["raw_spin"] += spin #spin
+        self.episode_sums["raw_head"] += heading_error
 
         # print(self.episode_sums)
 
@@ -746,11 +792,11 @@ class irisTask(RLTask):
         die = torch.zeros_like(self.reset_buf)
 
         # print("target_dist = ",self.target_dist)
-        die = torch.where(self.target_dist > 0.5, ones, die)
+        die = torch.where(self.target_dist > 0.35, ones, die)  #0.5
 
         # z >= 0.5 & z <= 5.0 & up > 0
         # print("root pos = ",self.root_positions[:, 2])
-        die = torch.where(self.root_positions[..., 2] < 0.3, ones, die)
+        die = torch.where(self.root_positions[..., 2] < 0.3, ones, die)   #0.3
 
         # print("die = ",die)
 
