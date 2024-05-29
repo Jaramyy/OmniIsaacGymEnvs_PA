@@ -63,7 +63,7 @@ class irisTask(RLTask):
         self.target_positions = torch.zeros((self._num_envs, 3), device=self._device, dtype=torch.float32)
         self.target_positions[:, 2] = 1
         self._ball_position = torch.tensor([0, 0, 1.0])
-        self._obs_position = torch.tensor([0.5, 0.5, 0.5])
+        self._obs_position = torch.tensor([1.5, 1.5, 1.0])
         
         self.actions = torch.zeros((self._num_envs, 4), device=self._device, dtype=torch.float32)
         self.prev_actions = torch.zeros((self._num_envs, 4), device=self._device, dtype=torch.float32) #for 1 previous time step
@@ -134,7 +134,7 @@ class irisTask(RLTask):
 
         self._copters = irisView(prim_paths_expr="/World/envs/.*/iris", name="irisView")
         self._balls = RigidPrimView(prim_paths_expr="/World/envs/.*/ball")
-        self._obstacles = RigidPrimView(prim_paths_expr="/World/envs/.*/obs")
+        self._obstacles = RigidPrimView(prim_paths_expr="/World/envs/.*/obs", name="obsView")
 
         scene.add(self._copters)
         scene.add(self._balls)
@@ -764,7 +764,7 @@ class irisTask(RLTask):
 
         # combined reward
         #self.rew_buf[:] = pos_reward + pos_reward * (up_reward + spin_reward) - effort_reward
-        self.rew_buf[:] = 1.5*pos_reward + (1.5*pos_reward * (up_reward)) + (pos_reward * (spin_reward)) - spin_penalty + (1*heading_reward)
+        self.rew_buf[:] = 1.5*pos_reward + (1.5*pos_reward * (up_reward)) + (pos_reward * (spin_reward)) - spin_penalty + (1 * heading_reward)
         
         # print("pos_reward = ",self.rew_buf)
         # self.rew_buf[:] = pos_reward + pos_reward * (up_reward + spin_reward) 
