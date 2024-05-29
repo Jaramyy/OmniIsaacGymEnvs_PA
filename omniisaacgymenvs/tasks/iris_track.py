@@ -63,7 +63,8 @@ class irisTask(RLTask):
         self.target_positions = torch.zeros((self._num_envs, 3), device=self._device, dtype=torch.float32)
         self.target_positions[:, 2] = 1
         self._ball_position = torch.tensor([0, 0, 1.0])
-        self._obs_position = torch.tensor([1.5, 1.5, 1.0])
+        self._obs_position_0 = torch.tensor([1.5, 1.5, 1.0])
+        self._obs_position_1 = torch.tensor([1.0, -1.5, 1.0])
         
         self.actions = torch.zeros((self._num_envs, 4), device=self._device, dtype=torch.float32)
         self.prev_actions = torch.zeros((self._num_envs, 4), device=self._device, dtype=torch.float32) #for 1 previous time step
@@ -126,19 +127,24 @@ class irisTask(RLTask):
         RLTask.set_up_scene(self, scene)
         
         self.central_env_idx = self._env_pos.norm(dim=-1).argmin()
-        # central_env_pos = self._env_pos[self.central_env_idx].cpu().numpy()
-        # set_camera_view(
-        #     eye=central_env_pos + np.asarray(self.cfg.viewer.eye), 
-        #     target=central_env_pos + np.asarray(self.cfg.viewer.lookat)
-        # )
+        central_env_pos = self._env_pos[self.central_env_idx].cpu().numpy()
+        set_camera_view(
+            eye=central_env_pos + np.array([7, 7, 5]), 
+            target=central_env_pos + np.array([0, 0, 0])
+        )
+      
+
 
         self._copters = irisView(prim_paths_expr="/World/envs/.*/iris", name="irisView")
-        self._balls = RigidPrimView(prim_paths_expr="/World/envs/.*/ball")
-        self._obstacles = RigidPrimView(prim_paths_expr="/World/envs/.*/obs", name="obsView")
+        self._balls = RigidPrimView(prim_paths_expr="/World/envs/.*/ball", name="ballView")
+        self._obstacles_0 = RigidPrimView(prim_paths_expr="/World/envs/.*/obs_0", name="obsView_0")
+        self._obstacles_1 = RigidPrimView(prim_paths_expr="/World/envs/.*/obs_1", name="obsView_1")
 
         scene.add(self._copters)
         scene.add(self._balls)
-        scene.add(self._obstacles)
+        scene.add(self._obstacles_0)
+        scene.add(self._obstacles_1)
+
 
         for i in range(4):
             scene.add(self._copters.physics_rotors[i])
@@ -172,18 +178,32 @@ class irisTask(RLTask):
         ball.set_collision_enabled(False)
     
     def set_obs(self):
-        obs = DynamicCylinder(
-            prim_path=self.default_zero_env_path + "/obs",
-            translation=self._obs_position,
+
+        obs_0 = DynamicCylinder(
+            prim_path=self.default_zero_env_path + "/obs_0",
+            translation=self._obs_position_0,
             name="obs_0",
             radius=0.1,
             height=1.0,
-            color=np.array([1.0, 0.0, 0.0]),
+            color=np.array([0.8, 0.8, 0.3]),
             mass=1.0)
         
-        self._sim_config.apply_articulation_settings("obstacle", get_prim_at_path(obs.prim_path),
+        obs_1 = DynamicCylinder(
+            prim_path=self.default_zero_env_path + "/obs_1",
+            translation=self._obs_position_1,
+            name="obs_1",
+            radius=0.1,
+            height=1.0,
+            color=np.array([0.8, 0.0, 0.3]),
+            mass=1.0)
+        
+        self._sim_config.apply_articulation_settings("obstacle", get_prim_at_path(obs_0.prim_path),
                                                      self._sim_config.parse_actor_config("obstacle"))
-        obs.set_collision_enabled(False)
+        obs_0.set_collision_enabled(False)
+
+        self._sim_config.apply_articulation_settings("obstacle", get_prim_at_path(obs_1.prim_path),
+                                                     self._sim_config.parse_actor_config("obstacle"))
+        obs_1.set_collision_enabled(False)
 
 
     def normalize(self, x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
