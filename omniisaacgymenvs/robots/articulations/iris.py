@@ -36,6 +36,6 @@ class iris(Robot):
             self._usd_path = self.server_path + "/Users/jaramy/Thesis-asset/iris.usd"
             
         add_reference_to_stage(self._usd_path, prim_path)
+        
         scale = torch.tensor([1, 1, 1])
-
         super().__init__(prim_path=prim_path, name=name, translation=translation, orientation=orientation, scale=scale)

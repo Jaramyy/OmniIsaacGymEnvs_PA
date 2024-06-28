@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from typing import Optional
 from omni.isaac.core.articulations import ArticulationView
-from omni.isaac.core.prims import RigidPrimView
+from omni.isaac.core.prims import RigidPrimView, RigidPrim
 from omni.isaac.core.robots.robot import Robot
 from omni.isaac.core.utils.torch.rotations import *
 from omni.isaac.core.utils.nucleus import get_assets_root_path
@@ -13,11 +13,13 @@ from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.isaac.core.utils.prims import get_prim_at_path
 from omni.isaac.core.objects import DynamicSphere
 from omni.isaac.core.objects import DynamicCylinder     #import for obstacle
+from omni.isaac.core.objects import DynamicCuboid       #import for wall (boundary)
 from omniisaacgymenvs.tasks.base.rl_task import RLTask
 from omniisaacgymenvs.robots.articulations.iris import iris
 from omniisaacgymenvs.robots.articulations.views.iris_view import irisView
 from omni.isaac.debug_draw import _debug_draw
 from omni.isaac.core.utils.viewports import set_camera_view
+import omni.replicator.core as rep
 
 class irisTask(RLTask):
     def __init__(
@@ -63,7 +65,7 @@ class irisTask(RLTask):
         self.target_positions = torch.zeros((self._num_envs, 3), device=self._device, dtype=torch.float32)
         self.target_positions[:, 2] = 1
         self._ball_position = torch.tensor([0, 0, 1.0])
-        self._obs_position_0 = torch.tensor([1.5, 1.5, 1.0])
+        self._obs_position_0 = torch.tensor([3.5, 1.5, 1.0])
         self._obs_position_1 = torch.tensor([1.0, -1.5, 1.0])
         
         self.actions = torch.zeros((self._num_envs, 4), device=self._device, dtype=torch.float32)
@@ -124,27 +126,29 @@ class irisTask(RLTask):
         self.get_iris()
         self.get_target()
         self.set_obs()
+        # self.get_wall()
+        self.set_wall()
         RLTask.set_up_scene(self, scene)
         
         self.central_env_idx = self._env_pos.norm(dim=-1).argmin()
         central_env_pos = self._env_pos[self.central_env_idx].cpu().numpy()
         set_camera_view(
-            eye=central_env_pos + np.array([7, 7, 5]), 
+            eye=central_env_pos + np.array([9, 7, 5]), 
             target=central_env_pos + np.array([0, 0, 0])
         )
       
-
 
         self._copters = irisView(prim_paths_expr="/World/envs/.*/iris", name="irisView")
         self._balls = RigidPrimView(prim_paths_expr="/World/envs/.*/ball", name="ballView")
         self._obstacles_0 = RigidPrimView(prim_paths_expr="/World/envs/.*/obs_0", name="obsView_0")
         self._obstacles_1 = RigidPrimView(prim_paths_expr="/World/envs/.*/obs_1", name="obsView_1")
+        # self.wall_a = RigidPrimView(prim_paths_expr="/World/envs/.*/wall_0", name="wallView_1")
 
         scene.add(self._copters)
         scene.add(self._balls)
         scene.add(self._obstacles_0)
         scene.add(self._obstacles_1)
-
+        # scene.add(self.wall_a)
 
         for i in range(4):
             scene.add(self._copters.physics_rotors[i])
@@ -160,9 +164,6 @@ class irisTask(RLTask):
     def get_world_scene(self):    
         # file_path = self.server_path + "/Users/jame7700/thesis_learning_navigation/world/world_simple_train.usda"
         file_path = self.server_path + "/Users/jaramy/Thesis-asset/world_simple_train.usda"
-        # self.pg.load_environment(file_path)
-        # self.pg.load_environment(SIMULATION_ENVIRONMENTS["Default Environment"])
-        # omniverse://localhost/NVIDIA/Assets/Isaac/2022.2.1/Isaac/Environments/Grid/default_environment.usd
 
     def get_target(self):
         radius = 0.1
@@ -178,7 +179,6 @@ class irisTask(RLTask):
         ball.set_collision_enabled(False)
     
     def set_obs(self):
-
         obs_0 = DynamicCylinder(
             prim_path=self.default_zero_env_path + "/obs_0",
             translation=self._obs_position_0,
@@ -204,6 +204,74 @@ class irisTask(RLTask):
         self._sim_config.apply_articulation_settings("obstacle", get_prim_at_path(obs_1.prim_path),
                                                      self._sim_config.parse_actor_config("obstacle"))
         obs_1.set_collision_enabled(False)
+    
+    def get_wall(self):
+        # from omni.isaac.core.utils.nucleus import get_assets_root_path
+        # from omni.isaac.core.utils.stage import add_reference_to_stage
+        from omni.isaac.core.utils.nucleus import get_server_path
+        
+        self.server_path = get_server_path()
+        if self.server_path is None:
+            print("Could not find Isaac Sim server path")
+            return
+        
+        wall_prim_path = self.default_zero_env_path + "/Assembly_1"
+        name = "wallView"
+        translation=torch.tensor([2.0,2.0,1.0])
+        scale = torch.tensor([1, 1, 1])
+
+        self._usd_path = self.server_path + "/Users/jaramy/Thesis-asset/wall.usda"
+        if self._usd_path is None:
+            assets_root_path = get_assets_root_path()
+            if assets_root_path is None:
+                print("Could not find Isaac Sim assets folder")
+        wallb = add_reference_to_stage(self._usd_path, wall_prim_path)
+        print(wallb)
+        
+        # wall_a = Robot(prim_path="/World/envs/.*/wall", name=name)
+        
+    
+        self._sim_config.apply_articulation_settings("wall", get_prim_at_path(wall_prim_path), self._sim_config.parse_actor_config("wall"))
+        # super().__init__(prim_path=prim_path, name=name, translation=translation, orientation=orientation, scale=scale)
+    
+    def set_wall(self):
+        wall_front = DynamicCuboid(
+            prim_path=self.default_zero_env_path + "/wall_front",
+            translation=torch.tensor([12.5,0.0,5.0]),
+            scale=torch.tensor([0.1,14.0,14.0]),
+            name="wall_front",
+            color=np.array([1.0, 0.0, 1.0]),
+            mass=1.0)
+        
+        self._sim_config.apply_articulation_settings("wall", get_prim_at_path(wall_front.prim_path),
+                                                     self._sim_config.parse_actor_config("wall"))
+        wall_front.set_collision_enabled(True)
+
+        wall_right = DynamicCuboid(
+            prim_path=self.default_zero_env_path + "/wall_right",
+            translation=torch.tensor([5.0 ,7.0,5.0]),
+            orientation=torch.tensor([0.707, 0.0, 0.0, 0.707]),
+            scale=torch.tensor([0.1,15.0,15.0]),
+            name="wall_right",
+            color=np.array([1.0, 1.0, 1.0]),
+            mass=1.0)
+        
+        self._sim_config.apply_articulation_settings("wall", get_prim_at_path(wall_right.prim_path),
+                                                     self._sim_config.parse_actor_config("wall"))
+        wall_right.set_collision_enabled(True)
+
+        wall_left = DynamicCuboid(
+            prim_path=self.default_zero_env_path + "/wall_left",
+            translation=torch.tensor([5.0 ,-7.0,5.0]),
+            orientation=torch.tensor([0.707, 0.0, 0.0, 0.707]),
+            scale=torch.tensor([0.1,15.0,15.0]),
+            name="wall_left",
+            color=np.array([1.0, 1.0, 1.0]),
+            mass=1.0)
+        
+        self._sim_config.apply_articulation_settings("wall", get_prim_at_path(wall_left.prim_path),
+                                                     self._sim_config.parse_actor_config("wall"))
+        wall_left.set_collision_enabled(True)
 
 
     def normalize(self, x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
@@ -215,6 +283,10 @@ class irisTask(RLTask):
         # self.pos,self.qua = self._copters.get_local_poses()
         # print("position",self.pos,"rot",self.qua)
         self.root_velocities = self._copters.get_velocities(clone=False)
+
+        position, oritentation = self._obstacles_0.get_world_poses(clone=False)
+        # print("Position is:", position - self._env_pos)
+        # print("Orientation is:", oritentation)
 
         self.target_pos = self._compute_traj(steps = self.future_traj_steps, step_size=5)
         self.set_targets(self.all_indices)
