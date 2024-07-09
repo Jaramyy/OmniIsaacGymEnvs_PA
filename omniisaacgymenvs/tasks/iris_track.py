@@ -19,7 +19,12 @@ from omniisaacgymenvs.robots.articulations.iris import iris
 from omniisaacgymenvs.robots.articulations.views.iris_view import irisView
 from omni.isaac.debug_draw import _debug_draw
 from omni.isaac.core.utils.viewports import set_camera_view
+
 import omni.replicator.core as rep
+
+from sklearn.neighbors import NearestNeighbors
+import heapq
+from scipy.interpolate import splprep, splev
 
 class irisTask(RLTask):
     def __init__(
@@ -719,16 +724,135 @@ class irisTask(RLTask):
         # traj_vis = traj_vis + self._env_pos[0]
         traj_vis = self._compute_traj(steps = 300, env_ids = self.central_env_idx)
         traj_vis = traj_vis + self._env_pos[self.central_env_idx]
-        
+        print(traj_vis.shape)
         point_list_0 = traj_vis[:-1].tolist()
         point_list_1 = traj_vis[1:].tolist()
 
+        # print(point_list_0)
+        # print("\n list  ",point_list_1)
+        # N = 1
+        # point_list_0 = [
+        #     (0, 0, 0) for _ in range(N)
+        # ]
+        # point_list_1 = [
+        #     (1, 1, 1) for _ in range(N)
+        # ]
+        # print(point_list_0)
+        # print("\n list  ",point_list_1)
         colors = [(1.0, 0.0, 0.0, 1.0) for _ in range(len(point_list_0))]
         sizes = [1 for _ in range(len(point_list_0))]
         self.draw.draw_lines(point_list_0, point_list_1, colors, sizes)
-    
+        
+
+        
+
     def scale_time(self, t, a: float=1.0):
         return t / (1 + 1/(a*torch.abs(t)))
+    
+    # Check if a point is inside the cylinder obstacle
+    def in_cylinder(self,p, center, radius):
+        print(p.shape)
+        print(center.shape)
+        return torch.norm(p - center, dim=-1) < radius
+    
+
+    # B-spline interpolation
+    def bspline_path(self,path, degree=3, num_points=100):
+        tck, u = splprep([path[:, 0].numpy(), path[:, 1].numpy()], s=0, k=degree)
+        u_new = np.linspace(u.min(), u.max(), num_points)
+        x_new, y_new = splev(u_new, tck)
+        return x_new, y_new
+    
+    def dijkstra(self, samples, edges, start_idx, goal_idx):
+        graph = {i: [] for i in range(len(samples))}
+        for edge in edges:
+            graph[edge[0]].append((torch.norm(samples[edge[0]] - samples[edge[1]]).item(), edge[1]))
+            graph[edge[1]].append((torch.norm(samples[edge[0]] - samples[edge[1]]).item(), edge[0]))
+        
+        queue = [(0, start_idx)]
+        distances = {i: float('inf') for i in range(len(samples))}
+        distances[start_idx] = 0
+        prev = {i: None for i in range(len(samples))}
+        
+        while queue:
+            curr_dist, curr_node = heapq.heappop(queue)
+            
+            if curr_dist > distances[curr_node]:
+                continue
+            
+            for weight, neighbor in graph[curr_node]:
+                distance = curr_dist + weight
+                
+                if distance < distances[neighbor]:
+                    distances[neighbor] = distance
+                    prev[neighbor] = curr_node
+                    heapq.heappush(queue, (distance, neighbor))
+        
+        # Reconstruct the path
+        path = []
+        curr = goal_idx
+        while prev[curr] is not None:
+            path.append(curr)
+            curr = prev[curr]
+        path.append(start_idx)
+        return path[::-1]
+    
+    def generateGuidingPath(self):
+        self.num_samples = 1000 
+        self.area_size = 10  #meter 
+        cylinder_center = torch.tensor([0.0 , 1.0])
+        cylinder_radius = torch.tensor([1.0]) # meter
+        k=5
+        self.cylinder_radius = 1 # meter
+        
+        start = torch.tensor([0.0, 0.0])
+        goal = torch.tensor([9.0, 9.0])
+
+        random_samples = torch.rand(self.num_samples, 2)
+        samples = self.area_size * random_samples
+        # print("cylinder center = ",cylinder_center)
+        # print("cylinder center = ",cylinder_center.shape)
+
+        # print("samples center = ",samples.shape)
+        samples = samples[~self.in_cylinder(samples, cylinder_center, cylinder_radius)]
+        
+        samples = torch.cat([start.unsqueeze(0), goal.unsqueeze(0), samples], dim=0)
+        # Create edges based on k-nearest neighbors
+
+        neighbors = NearestNeighbors(n_neighbors=k).fit(samples)
+        distances, indices = neighbors.kneighbors(samples)
+
+        # Create graph
+        edges = []
+        for i, neighbors in enumerate(indices):
+            for j in neighbors:
+                if i != j:
+                    p1, p2 = samples[i], samples[j]
+                    if (not self.in_cylinder((p1 + p2) / 2, cylinder_center, cylinder_radius)):
+                        edges.append((i, j))
+                        
+
+        # Get the shortest path
+        path_indices = self.dijkstra(samples , edges, 0, 1)
+        path = samples[path_indices]
+
+        spline_x, spline_y = self.bspline_path(path)
+        
+        spline_x = torch.tensor(spline_x, device=self.device)
+        spline_y = torch.tensor(spline_y, device=self.device)
+        spline_z = torch.ones_like(spline_x, device=self.device)
+
+        # Combine x, y, z into a single tensor
+        spline_xyz = torch.stack((spline_x, spline_y, spline_z), dim=1)
+        # print(spline_xyz.shape)
+        # print(spline_xyz)
+        spline_xyz = spline_xyz+ self._env_pos[self.central_env_idx]
+        point_list_0 = spline_xyz[:-1].tolist()   # cut the endding point to make a line ex. whose line is 1,2,3,4; point_list_0 = 1,2,3  
+        point_list_1 = spline_xyz[1:].tolist()    # cut the starting point to make a line ex. whose line is 1,2,3,4; point_list_1 = 2,3,4   then the line is 1-2, 2-3, 3-4
+
+        colors = [(1.0, 0.0, 0.0, 1.0) for _ in range(len(point_list_0))]
+        sizes = [2 for _ in range(len(point_list_0))]
+        self.draw.draw_lines(point_list_0, point_list_1, colors, sizes)
     
     def sin_traj(self, t, c: float=1.0):
         sin_t = torch.sin(t)
@@ -789,7 +913,8 @@ class irisTask(RLTask):
         # self.thrust_rot_damp[env_ids] = 0
         
         if self.render:
-            self.plot_guide_path()
+            # self.plot_guide_path()
+            self.generateGuidingPath()
             self.render = False
         # fill extras
         self.extras["episode"] = {}
