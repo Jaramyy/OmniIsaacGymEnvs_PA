@@ -1,0 +1,29 @@
+{
+    "os": "Linux-5.15.0-91-generic-x86_64-with-debian-bullseye-sid",
+    "python": "3.7.13",
+    "heartbeatAt": "2024-07-09T18:18:50.269800",
+    "startedAt": "2024-07-09T18:18:48.306449",
+    "docker": null,
+    "gpu": "NVIDIA GeForce RTX 2080 Ti",
+    "gpu_count": 1,
+    "cpu_count": 32,
+    "cuda": "11.0.228",
+    "args": [
+        "task=Iris",
+        "wandb_activate=True",
+        "wandb_entity=jaramyy",
+        "num_envs=1024"
+    ],
+    "state": "running",
+    "program": "scripts/rlgames_train.py",
+    "codePath": "omniisaacgymenvs/scripts/rlgames_train.py",
+    "git": {
+        "remote": "git@github.com:Jaramyy/OmniIsaacGymEnvs.git",
+        "commit": "c757fcc434a36ec8e61c3717cf85f923df5324c7"
+    },
+    "email": "jamephet@gmail.com",
+    "root": "/home/jaramy/.local/share/ov/pkg/isaac_sim-2022.2.1/thesis_ws/OmniIsaacGymEnvs",
+    "host": "aria-desktop",
+    "username": "jaramy",
+    "executable": "/home/jaramy/.local/share/ov/pkg/isaac_sim-2022.2.1/kit/python/bin/python3"
+}
